@@ -1,0 +1,190 @@
+// Core types for the SQL engine
+
+export type DataType = 'INT' | 'TEXT' | 'REAL' | 'BOOLEAN' | 'NULL';
+
+export interface ColumnDef {
+  name: string;
+  type: DataType;
+  primaryKey?: boolean;
+  notNull?: boolean;
+}
+
+export interface TableSchema {
+  name: string;
+  columns: ColumnDef[];
+}
+
+export type Value = string | number | boolean | null;
+
+export type Row = Record<string, Value>;
+
+export interface Database {
+  tables: Record<string, {
+    schema: TableSchema;
+    rows: Row[];
+  }>;
+}
+
+// AST types
+export interface CreateTableStmt {
+  type: 'CREATE_TABLE';
+  table: string;
+  columns: ColumnDef[];
+}
+
+export interface InsertStmt {
+  type: 'INSERT';
+  table: string;
+  columns?: string[];
+  values: Value[][];
+}
+
+export interface SelectStmt {
+  type: 'SELECT';
+  distinct?: boolean;
+  columns: SelectColumn[];
+  from: TableRef[];
+  joins?: JoinClause[];
+  where?: Expr;
+  groupBy?: Expr[];
+  having?: Expr;
+  orderBy?: OrderByClause[];
+  offset?: number;
+  limit?: number;
+}
+
+export interface SelectColumn {
+  expr: Expr;
+  alias?: string;
+}
+
+export interface TableRef {
+  name: string;
+  alias?: string;
+}
+
+export interface JoinClause {
+  type: 'INNER' | 'LEFT' | 'RIGHT';
+  table: TableRef;
+  on: Expr;
+}
+
+export interface OrderByClause {
+  expr: Expr;
+  direction: 'ASC' | 'DESC';
+}
+
+export interface UpdateStmt {
+  type: 'UPDATE';
+  table: string;
+  set: { column: string; value: Expr }[];
+  where?: Expr;
+}
+
+export interface DeleteStmt {
+  type: 'DELETE';
+  table: string;
+  where?: Expr;
+}
+
+export interface DropTableStmt {
+  type: 'DROP_TABLE';
+  table: string;
+}
+
+export type Statement =
+  | CreateTableStmt
+  | InsertStmt
+  | SelectStmt
+  | UpdateStmt
+  | DeleteStmt
+  | DropTableStmt;
+
+// Expressions
+export interface ColumnRef {
+  kind: 'column';
+  table?: string;
+  name: string;
+}
+
+export interface LiteralExpr {
+  kind: 'literal';
+  value: Value;
+}
+
+export interface StarExpr {
+  kind: 'star';
+  table?: string;
+}
+
+export interface BinaryExpr {
+  kind: 'binary';
+  op: BinaryOp;
+  left: Expr;
+  right: Expr;
+}
+
+export interface UnaryExpr {
+  kind: 'unary';
+  op: 'NOT' | '-';
+  operand: Expr;
+}
+
+export interface FuncCall {
+  kind: 'func';
+  name: string; // COUNT, SUM, AVG, MIN, MAX
+  args: Expr[];
+  distinct?: boolean;
+}
+
+export interface BetweenExpr {
+  kind: 'between';
+  expr: Expr;
+  lower: Expr;
+  upper: Expr;
+  negated?: boolean;
+}
+
+export interface InExpr {
+  kind: 'in';
+  expr: Expr;
+  list: Expr[];
+  negated?: boolean;
+}
+
+export interface IsNullExpr {
+  kind: 'isnull';
+  expr: Expr;
+  negated?: boolean;
+}
+
+export type Expr =
+  | ColumnRef
+  | LiteralExpr
+  | StarExpr
+  | BinaryExpr
+  | UnaryExpr
+  | FuncCall
+  | BetweenExpr
+  | InExpr
+  | IsNullExpr;
+
+export type BinaryOp =
+  | '=' | '<>' | '!=' | '<' | '<=' | '>' | '>='
+  | '+' | '-' | '*' | '/'
+  | 'AND' | 'OR' | 'LIKE';
+
+// Result types
+export interface ResultSet {
+  columns: string[];
+  rows: Value[][];
+  affectedRows?: number;
+  message?: string;
+}
+
+export interface QueryResult {
+  ok: boolean;
+  results: ResultSet[];
+  error?: string;
+  executionTimeMs: number;
+}

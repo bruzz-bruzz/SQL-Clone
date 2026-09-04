@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-sql-bg text-slate-100 antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+}
+
+@layer components {
+  .sql-editor {
+    @apply font-mono text-sm leading-relaxed whitespace-pre outline-none;
+    tab-size: 2;
+    caret-color: #38bdf8;
+  }
+
+  .sql-editor-overlay {
+    pointer-events: none;
+    @apply absolute inset-0 font-mono text-sm leading-relaxed whitespace-pre overflow-auto p-3;
+  }
+
+  .sql-textarea {
+    @apply font-mono text-sm leading-relaxed outline-none bg-transparent text-transparent caret-sql-accent resize-none w-full;
+    tab-size: 2;
+  }
+
+  .panel {
+    @apply bg-sql-panel border border-sql-border rounded-lg shadow-md;
+  }
+
+  .btn {
+    @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors border;
+  }
+  .btn-primary {
+    @apply bg-sql-accent/20 border-sql-accent/40 text-sql-accent hover:bg-sql-accent/30;
+  }
+  .btn-ghost {
+    @apply bg-transparent border-sql-border text-slate-300 hover:bg-slate-700/40;
+  }
+  .btn-danger {
+    @apply bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20;
+  }
+
+  .table-th {
+    @apply text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-300 border-b border-sql-border bg-slate-800/40;
+  }
+  .table-td {
+    @apply px-3 py-2 text-sm border-b border-sql-border/50 text-slate-200;
+  }
+  .table-tr:hover .table-td {
+    @apply bg-slate-700/30;
+  }
+}
