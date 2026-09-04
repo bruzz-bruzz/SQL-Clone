@@ -368,6 +368,16 @@ export class Executor {
       case 'between': return `${this.exprToString(expr.expr)} BETWEEN ${this.exprToString(expr.lower)} AND ${this.exprToString(expr.upper)}`;
       case 'in': return `${this.exprToString(expr.expr)} IN (...)`;
       case 'isnull': return `${this.exprToString(expr.expr)} IS ${expr.negated ? 'NOT ' : ''}NULL`;
+      case 'case': {
+        const head = expr.operand
+          ? `CASE ${this.exprToString(expr.operand)}`
+          : 'CASE';
+        const whens = expr.whens
+          .map(w => `WHEN ${this.exprToString(w.condition)} THEN ${this.exprToString(w.result)}`)
+          .join(' ');
+        const els = expr.else ? ` ELSE ${this.exprToString(expr.else)}` : '';
+        return `${head} ${whens}${els} END`;
+      }
     }
   }
 
@@ -388,7 +398,23 @@ export class Executor {
       case 'between': return this.evalBetween(expr, ctx);
       case 'in': return this.evalIn(expr, ctx);
       case 'isnull': return this.evalIsNull(expr, ctx);
+      case 'case': return this.evalCase(expr, ctx);
     }
+  }
+
+  private evalCase(expr: any, ctx: RowContext): Value {
+    // The simple-form parser already normalizes `CASE op WHEN val ...` to
+    // `CASE WHEN op = val ...`, so we always work in the searched form
+    // here. We just walk `whens` left to right and return the first match.
+    for (const w of expr.whens) {
+      if (this.evalBool(w.condition, ctx)) {
+        return this.evalValue(w.result, ctx);
+      }
+    }
+    if (expr.else !== undefined) {
+      return this.evalValue(expr.else, ctx);
+    }
+    return null;
   }
 
   private resolveColumn(name: string, table: string | undefined, ctx: RowContext): Value {

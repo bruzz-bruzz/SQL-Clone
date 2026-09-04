@@ -171,6 +171,23 @@ export interface IsNullExpr {
   negated?: boolean;
 }
 
+export interface CaseWhen {
+  condition: Expr;
+  result: Expr;
+}
+
+/** CASE expression.
+ *  Two forms are supported:
+ *    - Simple: `CASE operand WHEN value THEN result [...] [ELSE default] END`
+ *    - Searched: `CASE WHEN condition THEN result [...] [ELSE default] END`
+ *  `operand` is set for the simple form, undefined for the searched form. */
+export interface CaseExpr {
+  kind: 'case';
+  operand?: Expr;
+  whens: CaseWhen[];
+  else?: Expr;
+}
+
 export type Expr =
   | ColumnRef
   | LiteralExpr
@@ -180,7 +197,8 @@ export type Expr =
   | FuncCall
   | BetweenExpr
   | InExpr
-  | IsNullExpr;
+  | IsNullExpr
+  | CaseExpr;
 
 export type BinaryOp =
   | '=' | '<>' | '!=' | '<' | '<=' | '>' | '>='

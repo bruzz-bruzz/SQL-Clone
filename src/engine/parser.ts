@@ -333,7 +333,11 @@ export class Parser {
 
   private isClauseAhead(): boolean {
     const t = this.peek();
-    return t.type === 'KEYWORD' && ['FROM', 'WHERE', 'GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'ON', 'INNER', 'LEFT', 'RIGHT', 'JOIN', 'AS'].includes(t.value);
+    return t.type === 'KEYWORD' && [
+      'FROM', 'WHERE', 'GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET',
+      'ON', 'INNER', 'LEFT', 'RIGHT', 'JOIN', 'AS',
+      'WHEN', 'THEN', 'ELSE', 'END',
+    ].includes(t.value);
   }
 
   private parseJoin(): JoinClause {
@@ -480,6 +484,7 @@ export class Parser {
       if (t.value === 'TRUE') { this.advance(); return { kind: 'literal', value: true }; }
       if (t.value === 'FALSE') { this.advance(); return { kind: 'literal', value: false }; }
       if (t.value === 'NULL') { this.advance(); return { kind: 'literal', value: null }; }
+      if (t.value === 'CASE') { return this.parseCase(); }
       if (['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'].includes(t.value)) {
         return this.parseFuncCall(t.value);
       }
@@ -536,6 +541,56 @@ export class Parser {
     }
     this.expect(')');
     return { kind: 'func', name, args, distinct };
+  }
+
+  /** Parse a CASE expression. Two forms:
+   *    CASE WHEN cond THEN res [WHEN ...] [ELSE default] END
+   *    CASE operand WHEN value THEN res [WHEN ...] [ELSE default] END
+   *
+   *  Note: we disambiguate by peeking. If the token after CASE is `WHEN`,
+   *  it's the searched form. Otherwise it's the simple form.
+   *  Result expressions and (in the simple form) operand/WHEN values are
+   *  parsed as "value" expressions (parseAdditive), not full boolean
+   *  expressions, so the parser cleanly stops at WHEN/ELSE/END.
+   */
+  private parseCase(): Expr {
+    this.expect('CASE');
+    const whens: { condition: Expr; result: Expr }[] = [];
+    let operand: Expr | undefined;
+    if (!this.peekIf('WHEN')) {
+      // Simple CASE: operand is a value expression.
+      operand = this.parseAdditive();
+    }
+    while (this.peekIf('WHEN')) {
+      this.advance();
+      if (operand !== undefined) {
+        // Simple CASE: WHEN <value>. The internal condition is `operand = value`.
+        const value = this.parseAdditive();
+        this.expect('THEN');
+        whens.push({
+          condition: { kind: 'binary', op: '=', left: operand, right: value },
+          result: this.parseAdditive(),
+        });
+      } else {
+        // Searched CASE: WHEN <condition> THEN <result>
+        whens.push({ condition: this.parseExpr(), result: this.parseThen() });
+      }
+    }
+    let elseExpr: Expr | undefined;
+    if (this.peekIf('ELSE')) {
+      this.advance();
+      elseExpr = this.parseAdditive();
+    }
+    this.expect('END');
+    return { kind: 'case', operand, whens, else: elseExpr };
+  }
+
+  /** Consume a `THEN` keyword and parse the result expression (a full
+   *  expression, used by the searched CASE form so the THEN can be a
+   *  boolean, e.g. `WHEN a > 5 THEN a * 2`). */
+  private parseThen(): Expr {
+    this.expect('THEN');
+    return this.parseExpr();
   }
 
   private parseLiteralOrExpr(): Expr {

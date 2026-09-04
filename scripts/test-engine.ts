@@ -193,6 +193,62 @@ console.log('\n=== ERROR POSITION TESTS ===\n');
   }
 }
 
+console.log('\n=== CASE EXPRESSION TESTS ===\n');
+{
+  // Searched CASE with a string return. Alice=90000 (high), Bob=85000 (mid),
+  // Carol=70000 (mid), Dan=72000 (mid), Eve=60000 (mid), Frank=110000 (high).
+  const r = runQuery(JSON.parse(JSON.stringify(db)) as Database,
+    `SELECT name, CASE WHEN salary >= 100000 THEN 'exec' WHEN salary >= 85000 THEN 'high' WHEN salary >= 65000 THEN 'mid' ELSE 'low' END AS band FROM employees ORDER BY id;`);
+  assert(r.ok, 'searched CASE runs ok');
+  assert(r.results[0].columns[1] === 'band', 'band alias');
+  assert(r.results[0].rows[0][1] === 'high', 'Alice band = high');
+  assert(r.results[0].rows[1][1] === 'high', 'Bob band = high');
+  assert(r.results[0].rows[2][1] === 'mid',  'Carol band = mid');
+  assert(r.results[0].rows[3][1] === 'mid',  'Dan band = mid');
+  assert(r.results[0].rows[4][1] === 'low',  'Eve band = low');
+  assert(r.results[0].rows[5][1] === 'exec', 'Frank band = exec');
+}
+{
+  // Simple CASE.
+  const r = runQuery(JSON.parse(JSON.stringify(db)) as Database,
+    `SELECT id, CASE id WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END AS word FROM employees ORDER BY id;`);
+  assert(r.ok, 'simple CASE runs ok');
+  assert(r.results[0].rows[0][1] === 'one',   'id=1 maps to one');
+  assert(r.results[0].rows[1][1] === 'two',   'id=2 maps to two');
+  assert(r.results[0].rows[2][1] === 'other', 'id=3 maps to other');
+}
+{
+  // CASE without ELSE returns null.
+  const r = runQuery(JSON.parse(JSON.stringify(db)) as Database,
+    `SELECT CASE WHEN id = 999 THEN 'a' END AS x FROM employees ORDER BY id LIMIT 1;`);
+  assert(r.ok, 'CASE without ELSE runs ok');
+  assert(r.results[0].rows[0][0] === null, 'no-match without ELSE returns null');
+}
+{
+  // CASE inside an arithmetic expression. First three by id:
+  // id=1 salary 90000 * 2 = 180000; id=2 salary 85000 * 3 = 255000; id=3 salary 70000 * 1 = 70000.
+  const r = runQuery(JSON.parse(JSON.stringify(db)) as Database,
+    `SELECT id, salary * CASE WHEN id = 1 THEN 2 WHEN id = 2 THEN 3 ELSE 1 END AS scaled FROM employees ORDER BY id;`);
+  assert(r.ok, 'CASE inside arithmetic runs ok');
+  assert(r.results[0].rows[0][1] === 180000, 'id=1 scaled = 180000');
+  assert(r.results[0].rows[1][1] === 255000, 'id=2 scaled = 255000');
+  assert(r.results[0].rows[2][1] === 70000,  'id=3 scaled = 70000');
+}
+{
+  // CASE inside WHERE: filter rows by CASE-evaluated band. salary >= 70000
+  // matches 5 rows: Alice (90000), Bob (85000), Carol (70000), Dan (72000),
+  // Frank (110000). Eve (60000) is excluded.
+  const r = runQuery(JSON.parse(JSON.stringify(db)) as Database,
+    `SELECT name FROM employees WHERE CASE WHEN salary >= 70000 THEN 1 ELSE 0 END = 1 ORDER BY id;`);
+  assert(r.ok, 'CASE in WHERE runs ok');
+  assert(r.results[0].rows.length === 5, 'five rows match the CASE filter');
+  assert(r.results[0].rows[0][0] === 'Alice', 'first match is Alice');
+  assert(r.results[0].rows[1][0] === 'Bob',   'second match is Bob');
+  assert(r.results[0].rows[2][0] === 'Carol', 'third match is Carol');
+  assert(r.results[0].rows[3][0] === 'Dan',   'fourth match is Dan');
+  assert(r.results[0].rows[4][0] === 'Frank', 'fifth match is Frank');
+}
+
 console.log('\n=== DONE ===\n');
 if (failures.length === 0) {
   console.log('✅ All assertions passed.');

@@ -25,6 +25,7 @@ const KEYWORDS = new Set([
   'INT', 'INTEGER', 'TEXT', 'VARCHAR', 'REAL', 'FLOAT', 'BOOLEAN',
   'BOOL', 'TRUE', 'FALSE', 'LIKE', 'BETWEEN', 'IN', 'IS', 'COUNT',
   'SUM', 'AVG', 'MIN', 'MAX', 'IF', 'EXISTS', 'RETURNING',
+  'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
 ]);
 
 export class Tokenizer {
