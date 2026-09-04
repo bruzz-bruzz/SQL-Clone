@@ -37,6 +37,10 @@ export interface InsertStmt {
   table: string;
   columns?: string[];
   values: Value[][];
+  /** If set, the result is the projected columns of each inserted row.
+   *  When the array contains exactly one entry of kind `star`, all columns
+   *  of the target table are returned. */
+  returning?: ReturningItem[];
 }
 
 export interface SelectStmt {
@@ -79,12 +83,21 @@ export interface UpdateStmt {
   table: string;
   set: { column: string; value: Expr }[];
   where?: Expr;
+  returning?: ReturningItem[];
 }
 
 export interface DeleteStmt {
   type: 'DELETE';
   table: string;
   where?: Expr;
+  returning?: ReturningItem[];
+}
+
+/** One item in a RETURNING clause — either `*` (all columns) or an expression
+ *  with an optional alias. */
+export interface ReturningItem {
+  expr: Expr;
+  alias?: string;
 }
 
 export interface DropTableStmt {
@@ -186,5 +199,7 @@ export interface QueryResult {
   ok: boolean;
   results: ResultSet[];
   error?: string;
+  /** Character position in the source SQL where the error originated (0-based). */
+  errorPos?: number;
   executionTimeMs: number;
 }

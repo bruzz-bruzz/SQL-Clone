@@ -17,7 +17,7 @@ function showResult(label: string, sql: string) {
   const fresh = JSON.parse(JSON.stringify(db)) as Database;
   const r = runQuery(fresh, sql);
   if (!r.ok) {
-    console.log(`✗ ERROR: ${r.error}`);
+    console.log(`✗ ERROR: ${r.error}${typeof r.errorPos === 'number' ? `  (at pos ${r.errorPos})` : ''}`);
     return;
   }
   for (const rs of r.results) {
@@ -32,6 +32,45 @@ function showResult(label: string, sql: string) {
       console.log('  ' + row.map(v => v === null ? 'NULL' : String(v)).join(' | '));
     }
   }
+}
+
+const failures: string[] = [];
+function assert(cond: unknown, label: string) {
+  if (cond) {
+    console.log(`  ✓ ${label}`);
+  } else {
+    console.log(`  ✗ ${label}`);
+    failures.push(label);
+  }
+}
+
+function eqArr<T>(a: T[], b: T[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false;
+  return true;
+}
+
+function showAsserts(label: string, sql: string, checks: ((r: ReturnType<typeof runQuery>) => void)[]) {
+  console.log('─'.repeat(70));
+  console.log(`▶ ${label}`);
+  console.log(`SQL: ${sql.replace(/\n/g, ' ')}`);
+  const fresh = JSON.parse(JSON.stringify(db)) as Database;
+  const r = runQuery(fresh, sql);
+  if (!r.ok) {
+    console.log(`✗ ERROR: ${r.error}${typeof r.errorPos === 'number' ? `  (at pos ${r.errorPos})` : ''}`);
+    return;
+  }
+  for (const rs of r.results) {
+    if (rs.message) console.log(`  msg: ${rs.message}`);
+    if (rs.rows.length === 0) console.log('  (no rows)');
+    else {
+      console.log('  ' + rs.columns.join(' | '));
+      for (const row of rs.rows) {
+        console.log('  ' + row.map(v => v === null ? 'NULL' : String(v)).join(' | '));
+      }
+    }
+  }
+  for (const c of checks) c(r);
 }
 
 console.log('\n=== SQL ENGINE TESTS ===\n');
@@ -61,4 +100,104 @@ showResult('Multi-statement', `CREATE TABLE a (x INT); INSERT INTO a VALUES (1),
 showResult('Syntax error', `SELECT * FROM nope;`);
 showResult('DROP TABLE', `CREATE TABLE tmp (x INT); DROP TABLE tmp; SELECT * FROM tmp;`);
 
+// ---- RETURNING tests ----
+console.log('\n=== RETURNING TESTS ===\n');
+
+showAsserts(
+  'INSERT ... RETURNING * (single row)',
+  `INSERT INTO employees (id, name, department_id, salary, active) VALUES (10, 'Heidi', 1, 95000, TRUE) RETURNING *;`,
+  [r => {
+    const rs = r.results[0];
+    assert(rs && rs.columns.length === 5, 'has 5 columns');
+    assert(rs && rs.rows.length === 1, 'has 1 row');
+    assert(rs && rs.rows[0][0] === 10, 'id = 10');
+    assert(rs && rs.rows[0][1] === 'Heidi', 'name = Heidi');
+  }],
+);
+
+showAsserts(
+  'INSERT ... RETURNING specific columns + alias',
+  `INSERT INTO employees (id, name, salary) VALUES (11, 'Ivan', 77000) RETURNING id, name, salary * 12 AS annual;`,
+  [r => {
+    const rs = r.results[0];
+    assert(rs && eqArr(rs.columns, ['id', 'name', 'annual']), `columns = [id, name, annual] (got ${JSON.stringify(rs?.columns)})`);
+    assert(rs && rs.rows.length === 1, '1 row');
+    assert(rs && rs.rows[0][2] === 77000 * 12, 'annual = 924000');
+  }],
+);
+
+showAsserts(
+  'INSERT ... RETURNING (multi-row)',
+  `INSERT INTO employees (id, name, department_id, salary, active) VALUES (12, 'Judy', 2, 65000, TRUE), (13, 'Karl', 2, 68000, TRUE) RETURNING id, name;`,
+  [r => {
+    const rs = r.results[0];
+    assert(rs && rs.rows.length === 2, '2 rows returned');
+    assert(rs && eqArr(rs.rows[0], [12, 'Judy']), 'row 1 = (12, Judy)');
+    assert(rs && eqArr(rs.rows[1], [13, 'Karl']), 'row 2 = (13, Karl)');
+  }],
+);
+
+showAsserts(
+  'UPDATE ... RETURNING (new values + filter)',
+  `UPDATE employees SET salary = salary + 5000 WHERE department_id = 3 RETURNING id, name, salary;`,
+  [r => {
+    const rs = r.results[0];
+    assert(rs && rs.rows.length >= 1, 'at least 1 row returned');
+    for (const row of rs.rows) {
+      assert((row[2] as number) >= 65000, `Eve-class row has new salary >= 65000 (got ${row[2]})`);
+    }
+  }],
+);
+
+showAsserts(
+  'DELETE ... RETURNING *',
+  `DELETE FROM employees WHERE id = 5 RETURNING *;`,
+  [r => {
+    const rs = r.results[0];
+    assert(rs && rs.rows.length === 1, '1 row returned');
+    assert(rs && rs.rows[0][0] === 5, 'deleted id = 5');
+    assert(rs && rs.rows[0][1] === 'Eve', 'deleted name = Eve');
+  }],
+);
+
+// ---- Error position tests ----
+console.log('\n=== ERROR POSITION TESTS ===\n');
+{
+  const cases: Array<[string, string]> = [
+    [`SELEKT * FROM employees;`, `bad keyword`],
+    [`SELECT * FORM employees;`, `bad keyword FORM`],
+    [`SELECT * FROM ;`, `missing table name`],
+    [`SELECT * FROM "`, `unterminated quoted identifier`],
+  ];
+  for (const [sql, label] of cases) {
+    const fresh = JSON.parse(JSON.stringify(db)) as Database;
+    const r = runQuery(fresh, sql);
+    console.log('─'.repeat(70));
+    console.log(`▶ ${label}`);
+    console.log(`SQL: ${sql}`);
+    if (r.ok) {
+      console.log(`✗ expected error, got success`);
+      failures.push(`expected error for: ${label}`);
+    } else {
+      console.log(`✓ error: ${r.error}`);
+      if (typeof r.errorPos === 'number') {
+        const before = sql.slice(0, r.errorPos);
+        const line = before.split('\n').length;
+        const col = r.errorPos - before.lastIndexOf('\n');
+        console.log(`✓ errorPos = ${r.errorPos}  (line=${line}, col=${col})`);
+      } else {
+        console.log(`✗ errorPos missing`);
+        failures.push(`errorPos missing for: ${label}`);
+      }
+    }
+  }
+}
+
 console.log('\n=== DONE ===\n');
+if (failures.length === 0) {
+  console.log('✅ All assertions passed.');
+} else {
+  console.log(`❌ ${failures.length} assertion(s) failed:`);
+  for (const f of failures) console.log(`   - ${f}`);
+  process.exit(1);
+}

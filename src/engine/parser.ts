@@ -1,9 +1,15 @@
 import type { Token } from './tokenizer';
+import { SQLError } from './errors';
 import type {
   Statement, CreateTableStmt, InsertStmt, SelectStmt,
   UpdateStmt, DeleteStmt, DropTableStmt, ColumnDef, DataType,
   SelectColumn, TableRef, JoinClause, OrderByClause, Expr, BinaryOp, Value,
+  ReturningItem,
 } from '../types/sql';
+
+function errAt(msg: string, pos: number): SQLError {
+  return new SQLError(msg, pos);
+}
 
 export class Parser {
   private tokens: Token[];
@@ -27,7 +33,7 @@ export class Parser {
   private parseStatement(): Statement {
     const t = this.peek();
     if (t.type !== 'KEYWORD') {
-      throw new Error(`Expected keyword, got '${t.value}' at position ${t.pos}`);
+      throw errAt(`Expected keyword, got '${t.value}'`, t.pos);
     }
     switch (t.value) {
       case 'SELECT': return this.parseSelect();
@@ -37,7 +43,7 @@ export class Parser {
       case 'CREATE': return this.parseCreate();
       case 'DROP': return this.parseDrop();
       default:
-        throw new Error(`Unsupported statement: ${t.value}`);
+        throw errAt(`Unsupported statement: ${t.value}`, t.pos);
     }
   }
 
@@ -92,7 +98,7 @@ export class Parser {
       case 'BOOL':
         return 'BOOLEAN';
       default:
-        throw new Error(`Unknown type '${t.value}'`);
+        throw errAt(`Unknown type '${t.value}'`, t.pos);
     }
   }
 
@@ -127,7 +133,12 @@ export class Parser {
       this.expect(')');
       values.push(row);
     } while (this.consume(','));
-    return { type: 'INSERT', table, columns, values };
+    const stmt: InsertStmt = { type: 'INSERT', table, columns, values };
+    if (this.peekIf('RETURNING')) {
+      this.advance();
+      stmt.returning = this.parseReturningList();
+    }
+    return stmt;
   }
 
   private parseLiteral(): Value {
@@ -139,7 +150,7 @@ export class Parser {
       if (t.value === 'FALSE') { this.advance(); return false; }
       if (t.value === 'NULL') { this.advance(); return null; }
     }
-    throw new Error(`Expected literal, got '${t.value}' at position ${t.pos}`);
+    throw errAt(`Expected literal, got '${t.value}'`, t.pos);
   }
 
   private parseUpdate(): UpdateStmt {
@@ -154,7 +165,12 @@ export class Parser {
     } while (this.consume(','));
     let where: Expr | undefined;
     if (this.peekIf('WHERE')) { this.advance(); where = this.parseExpr(); }
-    return { type: 'UPDATE', table, set, where };
+    const stmt: UpdateStmt = { type: 'UPDATE', table, set, where };
+    if (this.peekIf('RETURNING')) {
+      this.advance();
+      stmt.returning = this.parseReturningList();
+    }
+    return stmt;
   }
 
   private parseDelete(): DeleteStmt {
@@ -163,7 +179,43 @@ export class Parser {
     const table = this.expectIdent();
     let where: Expr | undefined;
     if (this.peekIf('WHERE')) { this.advance(); where = this.parseExpr(); }
-    return { type: 'DELETE', table, where };
+    const stmt: DeleteStmt = { type: 'DELETE', table, where };
+    if (this.peekIf('RETURNING')) {
+      this.advance();
+      stmt.returning = this.parseReturningList();
+    }
+    return stmt;
+  }
+
+  /** Parse the column-list portion of a RETURNING clause. Supports:
+   *    RETURNING *
+   *    RETURNING col [, col ...]
+   *    RETURNING expr [AS alias] [, expr [AS alias] ...]
+   *
+   *  `RETURNING` is always the last clause, so a bare IDENT that follows an
+   *  expression is always an alias (not a clause keyword).
+   */
+  private parseReturningList(): ReturningItem[] {
+    const items: ReturningItem[] = [];
+    if (this.peek().type === 'OPERATOR' && this.peek().value === '*') {
+      this.advance();
+      items.push({ expr: { kind: 'star' } });
+      return items;
+    }
+    do {
+      const expr = this.parseExpr();
+      let alias: string | undefined;
+      if (this.peekIf('AS')) {
+        this.advance();
+        alias = this.expectIdent();
+      } else if (this.peek().type === 'IDENT') {
+        // RETURNING is the final clause in our DML grammar, so a trailing
+        // IDENT is always treated as an alias.
+        alias = this.advance().value;
+      }
+      items.push({ expr, alias });
+    } while (this.consume(','));
+    return items;
   }
 
   private parseSelect(): SelectStmt {
@@ -204,13 +256,13 @@ export class Parser {
     if (this.peekIf('LIMIT')) {
       this.advance();
       const t = this.peek();
-      if (t.type !== 'NUMBER') throw new Error('Expected number after LIMIT');
+      if (t.type !== 'NUMBER') throw errAt('Expected number after LIMIT', t.pos);
       limit = Number(t.value);
       this.advance();
       if (this.peekIf('OFFSET')) {
         this.advance();
         const t2 = this.peek();
-        if (t2.type !== 'NUMBER') throw new Error('Expected number after OFFSET');
+        if (t2.type !== 'NUMBER') throw errAt('Expected number after OFFSET', t2.pos);
         offset = Number(t2.value);
         this.advance();
       }
@@ -218,7 +270,7 @@ export class Parser {
     if (this.peekIf('OFFSET')) {
       this.advance();
       const t = this.peek();
-      if (t.type !== 'NUMBER') throw new Error('Expected number after OFFSET');
+      if (t.type !== 'NUMBER') throw errAt('Expected number after OFFSET', t.pos);
       offset = Number(t.value);
       this.advance();
     }
@@ -463,7 +515,7 @@ export class Parser {
       this.expect(')');
       return inner;
     }
-    throw new Error(`Unexpected token '${t.value}' in expression at position ${t.pos}`);
+    throw errAt(`Unexpected token '${t.value}' in expression`, t.pos);
   }
 
   private parseFuncCall(name: string): Expr {
@@ -512,7 +564,7 @@ export class Parser {
       this.advance();
       return t;
     }
-    throw new Error(`Expected '${value}' but got '${t.value}' at position ${t.pos}`);
+    throw errAt(`Expected '${value}' but got '${t.value}'`, t.pos);
   }
   private expectIdent(): string {
     const t = this.peek();
@@ -520,7 +572,7 @@ export class Parser {
       this.advance();
       return t.value;
     }
-    throw new Error(`Expected identifier, got '${t.value}' at position ${t.pos}`);
+    throw errAt(`Expected identifier, got '${t.value}'`, t.pos);
   }
   private consume(value: string): boolean {
     if (this.peekIf(value)) { this.advance(); return true; }

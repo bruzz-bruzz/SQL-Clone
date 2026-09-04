@@ -1,12 +1,29 @@
 import type {
   Database, Statement, SelectStmt, InsertStmt, UpdateStmt, DeleteStmt,
   CreateTableStmt, DropTableStmt, Expr, Row, Value, ColumnRef,
-  ResultSet, TableRef, JoinClause,
+  ResultSet, TableRef, JoinClause, ReturningItem,
 } from '../types/sql';
 
 interface RowContext {
   // source name -> Row
   [source: string]: any;
+}
+
+// Best-effort default column name for a projected expression.
+function defaultAlias(expr: any, index: number): string {
+  if (!expr) return `col${index + 1}`;
+  switch (expr.kind) {
+    case 'column': return expr.table ? `${expr.table}.${expr.name}` : expr.name;
+    case 'literal': return expr.value === null ? 'NULL' : String(expr.value);
+    case 'star': return '*';
+    case 'func': return `${expr.name}(...)`;
+    case 'binary': return `expr${index + 1}`;
+    case 'unary': return `expr${index + 1}`;
+    case 'between': return `expr${index + 1}`;
+    case 'in': return `expr${index + 1}`;
+    case 'isnull': return `expr${index + 1}`;
+    default: return `col${index + 1}`;
+  }
 }
 
 export class Executor {
@@ -53,6 +70,7 @@ export class Executor {
       }
     }
     let inserted = 0;
+    const insertedRows: Row[] = [];
     for (const rowValues of stmt.values) {
       if (rowValues.length !== cols.length) {
         throw new Error(`Column count mismatch in INSERT: got ${rowValues.length}, expected ${cols.length}`);
@@ -66,6 +84,10 @@ export class Executor {
         }
         row[colDef.name] = v;
       }
+      // Backfill any omitted columns (not in `cols`) with null so RETURNING has full rows.
+      for (const colDef of tbl.schema.columns) {
+        if (!(colDef.name in row)) row[colDef.name] = null;
+      }
       const pk = tbl.schema.columns.find(c => c.primaryKey);
       if (pk) {
         const pkVal = row[pk.name];
@@ -74,7 +96,11 @@ export class Executor {
         }
       }
       tbl.rows.push(row);
+      insertedRows.push(row);
       inserted++;
+    }
+    if (stmt.returning) {
+      return this.projectReturning(stmt.returning, insertedRows, stmt.table, tbl.schema.columns.map(c => c.name), `${inserted} row(s) inserted`);
     }
     return {
       columns: ['affected_rows'],
@@ -109,6 +135,7 @@ export class Executor {
     const tbl = this.db.tables[stmt.table];
     if (!tbl) throw new Error(`Table '${stmt.table}' does not exist`);
     let updated = 0;
+    const updatedRows: Row[] = [];
     for (const row of tbl.rows) {
       const ctx: RowContext = { [stmt.table]: row };
       if (stmt.where && !this.evalBool(stmt.where, ctx)) continue;
@@ -122,7 +149,11 @@ export class Executor {
         newVal = this.coerce(newVal, colDef.type);
         row[column] = newVal;
       }
+      updatedRows.push(row);
       updated++;
+    }
+    if (stmt.returning) {
+      return this.projectReturning(stmt.returning, updatedRows, stmt.table, tbl.schema.columns.map(c => c.name), `${updated} row(s) updated`);
     }
     return { columns: ['affected_rows'], rows: [[updated]], affectedRows: updated, message: `${updated} row(s) updated` };
   }
@@ -132,15 +163,20 @@ export class Executor {
     if (!tbl) throw new Error(`Table '${stmt.table}' does not exist`);
     let deleted = 0;
     const remaining: Row[] = [];
+    const removed: Row[] = [];
     for (const row of tbl.rows) {
       const ctx: RowContext = { [stmt.table]: row };
       if (stmt.where && !this.evalBool(stmt.where, ctx)) {
         remaining.push(row);
       } else {
+        removed.push(row);
         deleted++;
       }
     }
     tbl.rows = remaining;
+    if (stmt.returning) {
+      return this.projectReturning(stmt.returning, removed, stmt.table, tbl.schema.columns.map(c => c.name), `${deleted} row(s) deleted`);
+    }
     return { columns: ['affected_rows'], rows: [[deleted]], affectedRows: deleted, message: `${deleted} row(s) deleted` };
   }
 
@@ -458,6 +494,27 @@ export class Executor {
     const v = this.evalValue(expr.expr, ctx);
     const isNull = v === null;
     return expr.negated ? !isNull : isNull;
+  }
+
+  /** Build a ResultSet from a list of RETURNING items applied to a set of rows
+   *  from `tableName`. `allColumns` is the schema column order, used for `*`. */
+  private projectReturning(
+    items: ReturningItem[],
+    rows: Row[],
+    tableName: string,
+    allColumns: string[],
+    message: string,
+  ): ResultSet {
+    const isStar = items.length === 1 && items[0].expr.kind === 'star';
+    const outCols: string[] = isStar
+      ? allColumns.slice()
+      : items.map((it, idx) => it.alias ?? defaultAlias(items[idx].expr, idx));
+    const outRows: Value[][] = rows.map(r => {
+      const ctx: RowContext = { [tableName]: r };
+      if (isStar) return allColumns.map(c => r[c] ?? null);
+      return items.map(it => this.evalValue(it.expr, ctx));
+    });
+    return { columns: outCols, rows: outRows, message };
   }
 
   private evalFunc(expr: any, ctx: RowContext): Value {

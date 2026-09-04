@@ -1,5 +1,7 @@
 // Simple SQL tokenizer
 
+import { SQLError } from './errors';
+
 export type TokenType =
   | 'KEYWORD'
   | 'IDENT'
@@ -22,7 +24,7 @@ const KEYWORDS = new Set([
   'BY', 'HAVING', 'ORDER', 'ASC', 'DESC', 'LIMIT', 'OFFSET', 'DISTINCT',
   'INT', 'INTEGER', 'TEXT', 'VARCHAR', 'REAL', 'FLOAT', 'BOOLEAN',
   'BOOL', 'TRUE', 'FALSE', 'LIKE', 'BETWEEN', 'IN', 'IS', 'COUNT',
-  'SUM', 'AVG', 'MIN', 'MAX', 'IF', 'EXISTS',
+  'SUM', 'AVG', 'MIN', 'MAX', 'IF', 'EXISTS', 'RETURNING',
 ]);
 
 export class Tokenizer {
@@ -89,7 +91,7 @@ export class Tokenizer {
       this.pos++;
     }
     if (this.pos >= this.input.length) {
-      throw new Error(`Unterminated string literal starting at position ${start}`);
+      throw new SQLError(`Unterminated string literal starting at position ${start}`, start);
     }
     this.pos++; // skip closing quote
     return { type: 'STRING', value, pos: start };
@@ -104,7 +106,7 @@ export class Tokenizer {
       this.pos++;
     }
     if (this.pos >= this.input.length) {
-      throw new Error(`Unterminated quoted identifier at position ${start}`);
+      throw new SQLError(`Unterminated quoted identifier at position ${start}`, start);
     }
     this.pos++;
     return { type: 'IDENT', value, pos: start };
@@ -149,6 +151,6 @@ export class Tokenizer {
     if ('=<>+-*/%'.includes(ch)) {
       return { type: 'OPERATOR', value: ch, pos: start };
     }
-    throw new Error(`Unexpected character '${ch}' at position ${start}`);
+    throw new SQLError(`Unexpected character '${ch}'`, start);
   }
 }
