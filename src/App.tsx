@@ -7,6 +7,7 @@ import { ResultTable } from './components/ResultTable';
 import { SchemaViewer } from './components/SchemaViewer';
 import { HistoryPanel, type HistoryEntry } from './components/HistoryPanel';
 import { SamplesPanel } from './components/SamplesPanel';
+import { ErrorView } from './components/ErrorView';
 
 interface BatchResult {
   results: ResultSet[];
@@ -123,13 +124,23 @@ export default function App() {
                             {batch.results.length > 1 && (
                               <div className="text-xs text-slate-400 mb-1">Result #{i + 1}</div>
                             )}
-                            <ResultTable result={r} />
+                            <ResultTable
+                              result={r}
+                              exportName={exportNameFor(sql, i)}
+                            />
                             {r.message && <div className="mt-1 text-[11px] text-slate-400">{r.message}</div>}
+                            {batch.results.length === 1 && typeof execTime === 'number' && (
+                              <div className="mt-1 text-[11px] text-slate-500">⏱ {execTime.toFixed(2)} ms</div>
+                            )}
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="text-rose-300 text-sm font-mono whitespace-pre-wrap">{batch.raw.error}</div>
+                      <ErrorView
+                        message={batch.raw.error ?? 'Unknown error'}
+                        source={sql}
+                        pos={batch.raw.errorPos}
+                      />
                     )
                   ) : (
                     <div className="text-slate-400 italic text-sm">Run a query to see results.</div>
@@ -202,4 +213,17 @@ function TabButton({
       {children}
     </button>
   );
+}
+
+// Produce a friendly CSV filename: try the first table name referenced,
+// then the first keyword, then a positional default.
+function exportNameFor(sql: string, index: number): string {
+  const fromMatch = sql.match(/\bFROM\s+["`"]?(\w+)["`"]?/i);
+  if (fromMatch) return fromMatch[1].toLowerCase();
+  const intoMatch = sql.match(/\bINTO\s+["`"]?(\w+)["`"]?/i);
+  if (intoMatch) return intoMatch[1].toLowerCase();
+  const updateMatch = sql.match(/\bUPDATE\s+["`"]?(\w+)["`"]?/i);
+  if (updateMatch) return updateMatch[1].toLowerCase();
+  if (index > 0) return `results-${index + 1}`;
+  return 'results';
 }
