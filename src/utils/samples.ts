@@ -86,6 +86,18 @@ ORDER BY e.salary DESC;`,
     sql: `SELECT name FROM employees WHERE name LIKE 'A%';`,
   },
   {
+    name: 'CASE WHEN — band employees by salary',
+    sql: `SELECT name, salary,
+  CASE
+    WHEN salary >= 100000 THEN 'executive'
+    WHEN salary >= 85000  THEN 'senior'
+    WHEN salary >= 65000  THEN 'mid'
+    ELSE 'junior'
+  END AS band
+FROM employees
+ORDER BY salary DESC;`,
+  },
+  {
     name: 'Update salary',
     sql: `UPDATE employees SET salary = salary * 1.1 WHERE department_id = 1;`,
   },

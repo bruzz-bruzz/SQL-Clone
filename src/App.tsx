@@ -172,6 +172,8 @@ export default function App() {
               <li>Joins: <code>INNER</code>, <code>LEFT</code>, <code>RIGHT</code></li>
               <li>Aggregates: <code>COUNT</code>, <code>SUM</code>, <code>AVG</code>, <code>MIN</code>, <code>MAX</code> with <code>GROUP BY</code> / <code>HAVING</code></li>
               <li>Patterns: <code>LIKE '%foo%'</code>, <code>BETWEEN</code>, <code>IN (...)</code>, <code>IS NULL</code></li>
+              <li>Conditionals: <code>CASE WHEN ... THEN ... ELSE ... END</code></li>
+              <li>DML: append <code>RETURNING *</code> or <code>RETURNING col[, ...]</code> to <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code></li>
               <li>Multiple statements supported; separate with <code>;</code></li>
             </ul>
           </div>
